@@ -1,0 +1,23 @@
+requests>=2.32
+playwright>=1.55
+pillow>=10
+numpy>=1.26
+opencv-python>=4.10
+imagehash>=4.3
+imageio[ffmpeg]>=2.34
+pyyaml>=6.0
+tqdm>=4.66
+diffusers>=0.32
+peft>=0.13
+accelerate>=1.0
+transformers>=4.45
+safetensors>=0.4
+einops>=0.7
+sentencepiece>=0.2
+
+# decord: Linux/Windows only (PyPI wheel not provided for macOS arm64).
+# Falls back to torchvision in dataset_loader.py when import fails.
+decord>=0.6 ; platform_system != "Darwin"
+
+# torch: rely on the user's pre-installed CUDA build (currently 2.11.0 + CUDA 13.2).
+# bitsandbytes: optional 8bit AdamW; Windows wheels are unstable, install manually if needed.

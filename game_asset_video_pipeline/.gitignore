@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store
+
+# Runtime artifacts
+dataset/html/*
+dataset/videos/*
+dataset/frames/*
+dataset/processed/*
+dataset/metadata.jsonl
+dataset/failed.jsonl
+dataset/quality_report.jsonl
+!dataset/**/.gitkeep
+
+# Model weights / training outputs
+models/
+outputs/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# Logs
+*.log
+logs/

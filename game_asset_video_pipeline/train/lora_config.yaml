@@ -1,0 +1,56 @@
+# Wan2.2 5B LoRA training configuration.
+#
+# - Update `model.base_model_path` to wherever you downloaded the
+#   Wan-AI/Wan2.2-TI2V-5B-Diffusers checkpoint (HuggingFace).
+# - On a 16GB GPU prefer bf16 + gradient_checkpointing + adamw_8bit.
+# - The first experiment should be a 100-sample overfit test.
+
+model:
+  base_model_path: "./models/Wan2.2-TI2V-5B"   # HuggingFace diffusers-format dir
+  train_target: "dit"                          # 'dit' transformer only
+
+dataset:
+  train_metadata_path: "./dataset/processed/train_metadata.jsonl"
+  val_metadata_path:   "./dataset/processed/val_metadata.jsonl"
+  resolution: 512
+  num_frames: 49
+  fps: 24
+  num_workers: 0      # decord on Windows can deadlock with workers > 0
+  dataset_root: "./dataset"
+
+train:
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  epochs: 10
+  learning_rate: 0.0002
+  weight_decay: 0.01
+  mixed_precision: "bf16"          # bf16 | fp16 | fp32
+  max_grad_norm: 1.0
+  save_every_steps: 500
+  log_every_steps: 10
+  warmup_steps: 50
+  seed: 42
+  gradient_checkpointing: true
+  cache_latents: false             # placeholder hook for VAE-latent caching
+  optim: "adamw"                   # "adamw" | "adamw_8bit" (bitsandbytes)
+  output_dir: "./outputs/icon_lora"
+
+lora:
+  rank: 64
+  alpha: 64
+  dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - to_q
+    - to_k
+    - to_v
+    - to_out
+
+inference:
+  num_inference_steps: 30
+  guidance_scale: 5.0
+  negative_prompt: "blurry, watermark, text, logo, low quality, low resolution, photorealistic, distorted"
+  seed: 0

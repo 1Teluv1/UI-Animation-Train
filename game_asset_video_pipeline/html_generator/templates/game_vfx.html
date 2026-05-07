@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>game_vfx</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: __BG_COLOR__; }
+  .stage { position: relative; width: 512px; height: 512px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <canvas id="vfx" width="512" height="512"></canvas>
+</div>
+<script>
+(function () {
+  const canvas = document.getElementById('vfx');
+  const ctx = canvas.getContext('2d');
+  const W = 512, H = 512, CX = W/2, CY = H/2;
+  const DUR = __DURATION_MS__;
+  const PRIMARY = '__PRIMARY__';
+  const ACCENT = '__ACCENT__';
+  const BG = '__BG_COLOR__';
+
+  const N = 80;
+  const particles = [];
+  for (let i = 0; i < N; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 60 + Math.random() * 180;
+    particles.push({
+      a, sp,
+      r: 2 + Math.random() * 4,
+      delay: Math.random() * 0.15,
+      hue: Math.random() < 0.5 ? PRIMARY : ACCENT,
+    });
+  }
+
+  let start = null;
+  function frame(ts) {
+    if (start === null) start = ts;
+    const t = ((ts - start) % DUR) / DUR;
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+
+    const ringT = Math.min(1, t / 0.55);
+    const ringR = 30 + ringT * 200;
+    const ringAlpha = (1 - ringT) * 0.9;
+    ctx.beginPath();
+    ctx.arc(CX, CY, ringR, 0, Math.PI * 2);
+    ctx.lineWidth = 14 * (1 - ringT) + 2;
+    ctx.strokeStyle = PRIMARY;
+    ctx.globalAlpha = ringAlpha;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    const coreR = 40 + Math.sin(t * Math.PI) * 30;
+    const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, coreR);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.4, ACCENT);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(CX, CY, coreR, 0, Math.PI * 2); ctx.fill();
+
+    for (const p of particles) {
+      const lt = Math.max(0, Math.min(1, (t - p.delay) / (1 - p.delay)));
+      if (lt <= 0) continue;
+      const dist = lt * p.sp + 20;
+      const x = CX + Math.cos(p.a) * dist;
+      const y = CY + Math.sin(p.a) * dist;
+      ctx.globalAlpha = (1 - lt);
+      ctx.fillStyle = p.hue;
+      ctx.beginPath(); ctx.arc(x, y, p.r * (1 - lt * 0.5), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
