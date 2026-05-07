@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
@@ -13,34 +13,48 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { JobRunnerPanel, useJobRunner } from "@/components/job-runner";
 import { VideoGrid } from "@/components/video-grid";
 import { ASSET_TYPES, type AssetType, type MetadataRecord } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const fetcher = (u: string) => fetch(u).then((r) => r.json());
 
 export default function GeneratePage() {
   const [category, setCategory] = useState<AssetType>("ui_reward");
   const [count, setCount] = useState(2);
-  const [duration, setDuration] = useState(2.0);
-  const [seed, setSeed] = useState(0);
   const [startId, setStartId] = useState<string>("");
-  const [noLlm, setNoLlm] = useState(true);
   const [alsoWebm, setAlsoWebm] = useState(false);
   const [keepFrames, setKeepFrames] = useState(false);
 
   const { state, start, cancel } = useJobRunner();
   const { data: lms } = useSWR("/api/lmstudio/ping", fetcher, { refreshInterval: 30000 });
   const [lastBatch, setLastBatch] = useState<MetadataRecord[]>([]);
+  const busy = state.status === "running";
 
-  async function fetchRecent() {
+  const fetchRecent = useCallback(async () => {
     try {
       const j = await fetch(`/api/dataset/list?page=1&pageSize=${count}&category=${category}`).then((r) => r.json());
       setLastBatch(j.items ?? []);
     } catch { /* ignore */ }
-  }
+  }, [category, count]);
+
+  /** While a job runs, metadata.jsonl grows sample-by-sample — poll so Latest preview updates mid-run. */
+  useEffect(() => {
+    if (!busy) return;
+    void fetchRecent();
+    const id = setInterval(() => void fetchRecent(), 2000);
+    return () => clearInterval(id);
+  }, [busy, fetchRecent]);
+
+  /** Final refresh when the job ends (interval may have stopped slightly before the last line landed). */
+  useEffect(() => {
+    if (state.status === "done" || state.status === "error" || state.status === "cancelled") {
+      void fetchRecent();
+    }
+  }, [state.status, fetchRecent]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!noLlm && !lms?.ok) {
-      toast.error("LM Studio is offline. Toggle 'no-llm' to use bundled templates instead.");
+    if (!lms?.ok) {
+      toast.error("LM Studio is offline.");
       return;
     }
     await start(() =>
@@ -50,10 +64,7 @@ export default function GeneratePage() {
         body: JSON.stringify({
           category,
           count,
-          duration,
-          seed,
           startId: startId === "" ? undefined : Number(startId),
-          noLlm,
           alsoWebm,
           keepFrames,
           verbose: true,
@@ -70,7 +81,7 @@ export default function GeneratePage() {
           Generate Dataset (Phase 1)
         </h1>
         <p className="text-sm text-muted-foreground">
-          Spawn the LM Studio HTML pipeline (or bundled templates) and capture each clip to MP4.
+          Spawn the LM Studio HTML pipeline with prompt bank entries and capture each clip to MP4.
         </p>
       </header>
 
@@ -84,7 +95,7 @@ export default function GeneratePage() {
             <form onSubmit={onSubmit} className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <Label className="mb-1.5 block">Category</Label>
-                <Select value={category} onValueChange={(v) => setCategory(v as AssetType)}>
+                <Select value={category} onValueChange={(v) => setCategory(v as AssetType)} disabled={busy}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {ASSET_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
@@ -93,25 +104,20 @@ export default function GeneratePage() {
               </div>
               <div>
                 <Label className="mb-1.5 block">Count</Label>
-                <Input type="number" min={1} max={2000} value={count} onChange={(e) => setCount(Number(e.target.value))} />
+                <Input type="number" min={1} max={2000} value={count} onChange={(e) => setCount(Number(e.target.value))} disabled={busy} />
               </div>
               <div>
-                <Label className="mb-1.5 block">Duration (s)</Label>
-                <Input type="number" step={0.1} min={0.5} max={10} value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
-              </div>
-              <div>
-                <Label className="mb-1.5 block">Seed</Label>
-                <Input type="number" min={0} value={seed} onChange={(e) => setSeed(Number(e.target.value))} />
+                <Label className="mb-1.5 block">Mode</Label>
+                <Input value="Prompt bank (LLM only)" disabled />
               </div>
               <div>
                 <Label className="mb-1.5 block">Start ID (optional)</Label>
-                <Input type="number" min={0} value={startId} placeholder="auto" onChange={(e) => setStartId(e.target.value)} />
+                <Input type="number" min={0} value={startId} placeholder="auto" onChange={(e) => setStartId(e.target.value)} disabled={busy} />
               </div>
 
-              <div className="col-span-2 grid grid-cols-3 gap-3 pt-2">
-                <ToggleRow label="No LLM (use templates)" checked={noLlm} onChange={setNoLlm} />
-                <ToggleRow label="Also WebM" checked={alsoWebm} onChange={setAlsoWebm} />
-                <ToggleRow label="Keep PNG frames" checked={keepFrames} onChange={setKeepFrames} />
+              <div className="col-span-2 grid grid-cols-2 gap-3 pt-2">
+                <ToggleRow label="Also WebM" checked={alsoWebm} onChange={setAlsoWebm} disabled={busy} />
+                <ToggleRow label="Keep PNG frames" checked={keepFrames} onChange={setKeepFrames} disabled={busy} />
               </div>
 
               <div className="col-span-2 pt-2">
@@ -135,30 +141,53 @@ export default function GeneratePage() {
               onCancel={cancel}
               height={420}
             />
-            {(state.status === "done" || state.status === "error" || state.status === "cancelled") && (
-              <div className="pt-3 flex justify-end">
+            <div className="pt-3 flex justify-end gap-2">
+              {busy && (
+                <span className="text-xs text-muted-foreground self-center mr-auto">Preview 아래도 약 2초마다 갱신됩니다.</span>
+              )}
+              {(state.status === "done" || state.status === "error" || state.status === "cancelled") && (
                 <Button size="sm" variant="outline" onClick={fetchRecent}>Refresh preview</Button>
-              </div>
-            )}
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardHeader><CardTitle>Latest preview</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Latest preview</CardTitle>
+          <CardDescription>
+            같은 카테고리에서 최신 순 최대 {count}개입니다. 생성 중에도 주기적으로 갱신됩니다.
+          </CardDescription>
+        </CardHeader>
         <CardContent>
-          <VideoGrid items={lastBatch} emptyHint="Run a job and click 'Refresh preview'." />
+          <VideoGrid items={lastBatch} emptyHint="작업을 시작하면 완료된 클립이 여기에 순서대로 나타납니다." />
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
-    <label className="flex items-center justify-between gap-3 rounded-md border bg-card/30 px-3 py-2 cursor-pointer">
+    <label
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-md border bg-card/30 px-3 py-2",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+      )}
+    >
       <span className="text-sm">{label}</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
     </label>
   );
 }

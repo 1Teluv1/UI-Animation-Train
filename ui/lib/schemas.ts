@@ -4,10 +4,7 @@ import { ASSET_TYPES } from "./types";
 export const generateRequestSchema = z.object({
   category: z.enum(ASSET_TYPES as [string, ...string[]]),
   count: z.number().int().min(1).max(2000),
-  duration: z.number().min(0.5).max(10).default(2.0),
-  seed: z.number().int().min(0).default(0),
   startId: z.number().int().min(0).optional(),
-  noLlm: z.boolean().default(false),
   alsoWebm: z.boolean().default(false),
   keepFrames: z.boolean().default(false),
   verbose: z.boolean().default(true),
@@ -44,7 +41,7 @@ export const datasetListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(24),
   category: z.string().optional(),
-  source: z.enum(["lm_studio", "fallback_template"]).optional(),
+  source: z.enum(["prompt_bank", "lm_studio", "fallback_template"]).optional(),
   motionPreset: z.string().optional(),
   search: z.string().optional(),
 });

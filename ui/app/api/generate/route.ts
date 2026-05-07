@@ -12,11 +12,8 @@ function buildArgs(req: ReturnType<typeof generateRequestSchema.parse>): string[
     "scripts/generate_dataset.py",
     "--count", String(req.count),
     "--category", req.category,
-    "--seed", String(req.seed),
-    "--duration", String(req.duration),
   ];
   if (req.startId !== undefined) args.push("--start-id", String(req.startId));
-  if (req.noLlm) args.push("--no-llm");
   if (req.alsoWebm) args.push("--also-webm");
   if (req.keepFrames) args.push("--keep-frames");
   if (req.verbose) args.push("--verbose");

@@ -43,6 +43,8 @@ export interface MetadataRecord {
   caption: string;
   asset_type: AssetType;
   subject: string;
+  prompt_id?: string | null;
+  user_prompt?: string | null;
   motion_preset?: string;
   motion?: string;
   style?: string;
@@ -50,7 +52,7 @@ export interface MetadataRecord {
   duration: number;
   fps: number;
   resolution: string;
-  source: "lm_studio" | "fallback_template";
+  source: "prompt_bank" | "lm_studio" | "fallback_template";
   created_at: string;
 }
 

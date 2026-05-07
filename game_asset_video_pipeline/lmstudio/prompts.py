@@ -1,10 +1,10 @@
-"""Prompt builders and spec-grid generator for HTML animation requests."""
+"""Prompt bank loader and message builders for HTML animation requests."""
 
 from __future__ import annotations
 
-import random
-from dataclasses import dataclass
-from typing import Dict, List, Sequence
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Sequence
 
 ASSET_TYPES: Sequence[str] = (
     "ui_reward",
@@ -29,75 +29,7 @@ MOTION_PRESETS: Sequence[str] = (
     "rotate_tilt",
 )
 
-# Subject pools per category. Kept small/curated so the resulting captions stay
-# coherent with the asset_type tag.
-_SUBJECT_POOLS: Dict[str, List[str]] = {
-    "ui_reward": [
-        "gold coin icon",
-        "blue gem icon",
-        "ruby crystal icon",
-        "treasure chest icon",
-        "star badge icon",
-        "trophy icon",
-        "diamond icon",
-        "level up banner icon",
-    ],
-    "emoji_motion": [
-        "smiling yellow emoji",
-        "winking emoji",
-        "laughing emoji",
-        "heart eyes emoji",
-        "sleepy emoji",
-        "fire emoji",
-        "thumbs up emoji",
-        "party popper emoji",
-    ],
-    "game_vfx": [
-        "blue magic burst",
-        "fire impact ring",
-        "lightning shock",
-        "energy shockwave",
-        "ice crystal burst",
-        "smoke puff",
-        "holy light pillar",
-        "shadow swirl",
-    ],
-    "item_showcase": [
-        "legendary sword icon",
-        "magic potion bottle",
-        "spell book icon",
-        "wooden shield",
-        "armor helmet icon",
-        "rune stone",
-        "crossbow icon",
-        "magic wand icon",
-    ],
-    "button_motion": [
-        "green play button",
-        "red close button",
-        "blue confirm button",
-        "yellow upgrade button",
-        "orange shop button",
-        "purple settings button",
-        "white pause button",
-        "gold premium button",
-    ],
-}
-
-_STYLE_BY_CATEGORY: Dict[str, str] = {
-    "ui_reward": "polished mobile game UI icon, cartoon, glossy",
-    "emoji_motion": "cute cartoon emoji, smooth flat shading",
-    "game_vfx": "stylized cartoon VFX, vibrant colors, rim glow",
-    "item_showcase": "high quality game item icon, crisp outline, painterly",
-    "button_motion": "clean mobile UI button, soft shadow, modern",
-}
-
-_BACKGROUND_CHOICES: List[str] = [
-    "solid dark background",
-    "solid charcoal background",
-    "solid navy background",
-    "solid deep purple background",
-]
+PROMPT_BANK_PATH = Path(__file__).resolve().parent / "data" / "user_prompt_bank.json"
 
 # Human-readable description fragments used both for the HTML user prompt and
 # the caption_builder so they stay in sync.
@@ -132,7 +64,7 @@ MOTION_TIMING: Dict[str, str] = {
 }
 
 
-SYSTEM_PROMPT = """You are an expert front-end engineer who writes self-contained HTML animation files for a game UI dataset.
+SYSTEM_PROMPT_HTML = """You are an expert front-end engineer who writes self-contained HTML animation files for a game UI dataset.
 
 You MUST follow ALL of these rules without exception:
 - Output ONE complete HTML file. No prose, no explanation.
@@ -149,90 +81,79 @@ You MUST follow ALL of these rules without exception:
 
 Return ONLY the raw HTML, optionally wrapped in a single ```html code block."""
 
+SYSTEM_PROMPT_PROMPT_BANK = """Create JSON-only prompt-bank entries for game UI animation generation.
+Each object MUST include:
+- prompt_id (unique string)
+- asset_type (one of: ui_reward, emoji_motion, game_vfx, item_showcase, button_motion)
+- subject (short lowercase label)
+- user_prompt (full prompt text for the HTML generator)
 
-def build_user_prompt(spec: Dict) -> str:
-    """Render a spec dict into a natural-language user prompt for the LLM."""
+Optional fields:
+- motion_preset, motion, style, background, duration, fps, resolution
 
-    motion_preset = spec.get("motion_preset")
-    motion_description = spec.get("motion") or MOTION_DESCRIPTION.get(
-        motion_preset, "performs a clean, looping motion"
-    )
-    duration = float(spec.get("duration", 2.0))
-    resolution = int(spec.get("resolution", 512))
-    fps = int(spec.get("fps", 24))
+Return a JSON array only."""
 
-    return (
-        "Generate a single self-contained HTML animation that meets ALL of the system rules.\n\n"
-        f"- asset_type: {spec['asset_type']}\n"
-        f"- subject: {spec['subject']}\n"
-        f"- motion_preset: {motion_preset}\n"
-        f"- motion description: {motion_description}\n"
-        f"- style: {spec.get('style', _STYLE_BY_CATEGORY.get(spec['asset_type'], 'cartoon game UI'))}\n"
-        f"- background: {spec.get('background', 'solid dark background')}\n"
-        f"- canvas size: {resolution}x{resolution} px\n"
-        f"- duration: {duration} seconds\n"
-        f"- target fps: {fps}\n\n"
-        "Important: the animation MUST visibly move and complete within the duration. "
-        "Center the subject. No external resources. No text overlays. Output ONLY the HTML."
-    )
+PROMPT_BANK_SCHEMA: Dict[str, Any] = {
+    "required": ("prompt_id", "asset_type", "subject", "user_prompt"),
+    "optional": (
+        "motion_preset",
+        "motion",
+        "style",
+        "background",
+        "duration",
+        "fps",
+        "resolution",
+    ),
+}
+
+def _validate_prompt_entry(entry: Dict[str, Any], index: int) -> None:
+    for key in PROMPT_BANK_SCHEMA["required"]:
+        if key not in entry:
+            raise ValueError(f"prompt bank entry #{index} missing required key: {key}")
+
+    asset_type = str(entry["asset_type"])
+    if asset_type not in ASSET_TYPES:
+        raise ValueError(
+            f"prompt bank entry #{index} has invalid asset_type={asset_type!r}; allowed={list(ASSET_TYPES)}"
+        )
+
+    if not str(entry["user_prompt"]).strip():
+        raise ValueError(f"prompt bank entry #{index} has empty user_prompt")
+
+    motion_preset = entry.get("motion_preset")
+    if motion_preset is not None and motion_preset not in MOTION_PRESETS:
+        raise ValueError(
+            f"prompt bank entry #{index} has invalid motion_preset={motion_preset!r}; allowed={list(MOTION_PRESETS)}"
+        )
+
+
+def load_prompt_bank(path: Path = PROMPT_BANK_PATH) -> List[Dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"prompt bank not found: {path}")
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise ValueError(f"prompt bank must be a JSON array: {path}")
+
+    entries: List[Dict[str, Any]] = []
+    seen_prompt_ids = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"prompt bank entry #{i} must be an object")
+        entry = dict(item)
+        _validate_prompt_entry(entry, i)
+        prompt_id = str(entry["prompt_id"])
+        if prompt_id in seen_prompt_ids:
+            raise ValueError(f"duplicate prompt_id in prompt bank: {prompt_id}")
+        seen_prompt_ids.add(prompt_id)
+        entries.append(entry)
+
+    return entries
 
 
 def build_messages(spec: Dict) -> List[Dict[str, str]]:
+    user_prompt = str(spec["user_prompt"]).strip()
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_prompt(spec)},
+        {"role": "system", "content": SYSTEM_PROMPT_HTML},
+        {"role": "user", "content": user_prompt},
     ]
-
-
-@dataclass
-class SpecGridConfig:
-    category: str
-    count: int
-    seed: int = 0
-    duration: float = 2.0
-    fps: int = 24
-    resolution: int = 512
-
-
-def build_spec_grid(
-    category: str,
-    count: int,
-    seed: int = 0,
-    duration: float = 2.0,
-    fps: int = 24,
-    resolution: int = 512,
-) -> List[Dict]:
-    """Generate `count` spec dicts for a given category.
-
-    Subjects and motion presets are sampled deterministically from the pools so
-    runs with the same `seed` reproduce the same dataset.
-    """
-
-    if category not in _SUBJECT_POOLS:
-        raise ValueError(
-            f"Unknown category '{category}'. Allowed: {sorted(_SUBJECT_POOLS)}"
-        )
-
-    rng = random.Random(seed)
-    subjects = _SUBJECT_POOLS[category]
-    style = _STYLE_BY_CATEGORY[category]
-
-    specs: List[Dict] = []
-    for _ in range(count):
-        subject = rng.choice(subjects)
-        motion_preset = rng.choice(list(MOTION_PRESETS))
-        background = rng.choice(_BACKGROUND_CHOICES)
-        specs.append(
-            {
-                "asset_type": category,
-                "subject": subject,
-                "motion_preset": motion_preset,
-                "motion": MOTION_DESCRIPTION[motion_preset],
-                "style": style,
-                "background": background,
-                "duration": duration,
-                "fps": fps,
-                "resolution": resolution,
-            }
-        )
-    return specs

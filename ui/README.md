@@ -106,12 +106,12 @@ dev 서버를 띄운 뒤 다음 6개를 차례로 확인하면 모든 핵심 경
 | 1 | `GET /api/health` | 200 + python/ffmpeg/GPU/Wan2.2 가중치 상태 |
 | 2 | `GET /api/dataset/list` | 200 + 기존 metadata.jsonl 페이징 |
 | 3 | `GET /api/dataset/file/videos/<id>.mp4` (with `Range`) | 200 + 206 (Partial Content) |
-| 4 | `POST /api/generate` (`{count:1, noLlm:true, ...}`) | SSE start → log → exit (code 0) |
+| 4 | `POST /api/generate` (`{count:1, ...}`) | SSE start → log → exit (code 0) |
 | 5 | `POST /api/preprocess` | SSE 정상 종료, `processed/train,val_metadata.jsonl` 생성 |
 | 6 | `POST /api/train/smoke` | Wan2.2 가중치 없으면 안내 메시지 + exit 2 |
 
 UI에서는:
-1. `/generate` → "Start Generation" (no-llm 토글 켜고 count=2)
+1. `/generate` → "Start Generation" (count=2)
 2. 종료 후 "Refresh preview" → 영상 인라인 재생 확인
 3. `/preprocess` → "Run Preprocess" → `/quality`에 자동 반영
 4. `/train` → YAML 편집 후 "Save" → "Smoke Test (1 step)"
@@ -120,7 +120,7 @@ UI에서는:
 
 - **로컬 전용**: 인증이 없으므로 외부 호스트에 노출하지 마세요. 기본 listen 주소는 `127.0.0.1`입니다.
 - **단일 작업**: 한 번에 한 Python 작업만 실행. 학습은 보통 길어지므로, 학습 중에는 generate/preprocess/inference가 거부됩니다.
-- **LM Studio 미실행 시**: 대시보드/Generate 페이지 카드에 "offline"으로 표시. 이때는 `--no-llm` 토글로 fallback 템플릿을 사용하세요.
+- **LM Studio 미실행 시**: 대시보드/Generate 페이지 카드에 "offline"으로 표시되며 Generate는 시작되지 않습니다.
 - **Wan2.2 가중치 없을 때**: Train/Inference는 명확한 에러 메시지로 종료합니다 (UI 정상 동작).
 - **`npm start` = `next dev`**: 코드 변경 시 자동 리로드. CPU/메모리 효율은 production 빌드(`npm run prod`)가 더 좋습니다.
 

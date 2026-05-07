@@ -25,8 +25,8 @@ export default function DatasetDetailPage({ params }: { params: { id: string } }
         {record && (
           <div className="flex gap-2">
             <Badge variant="outline">{record.asset_type}</Badge>
-            <Badge variant={record.source === "lm_studio" ? "default" : "secondary"}>
-              {record.source === "lm_studio" ? "LLM" : "fallback"}
+            <Badge variant={record.source === "prompt_bank" ? "default" : "secondary"}>
+              {record.source === "prompt_bank" ? "prompt_bank" : record.source}
             </Badge>
           </div>
         )}
@@ -66,6 +66,18 @@ export default function DatasetDetailPage({ params }: { params: { id: string } }
               <CardContent>
                 <pre className="overflow-auto rounded-md border bg-black/40 p-3 font-mono text-[11px] leading-snug">
 {JSON.stringify(record, null, 2)}
+                </pre>
+              </CardContent>
+            </Card>
+
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2"><CardTitle className="text-sm">User prompt</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  prompt_id: <code className="font-mono">{record.prompt_id ?? "-"}</code>
+                </div>
+                <pre className="overflow-auto rounded-md border bg-black/40 p-3 font-mono text-[11px] leading-snug whitespace-pre-wrap break-words">
+{record.user_prompt ?? "(no user_prompt in metadata; regenerate to include it)"}
                 </pre>
               </CardContent>
             </Card>

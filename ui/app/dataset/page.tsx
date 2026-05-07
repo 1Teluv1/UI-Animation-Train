@@ -74,6 +74,7 @@ export default function DatasetPage() {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">All sources</SelectItem>
+                <SelectItem value="prompt_bank">Prompt bank</SelectItem>
                 <SelectItem value="lm_studio">LM Studio</SelectItem>
                 <SelectItem value="fallback_template">Fallback</SelectItem>
               </SelectContent>

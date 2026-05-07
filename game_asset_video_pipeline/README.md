@@ -58,10 +58,10 @@ python -m playwright install chromium
 python scripts/generate_dataset.py --count 100 --category ui_reward --verbose
 ```
 
-### LM Studio 없이 fallback 템플릿만 사용 (Smoke / 오프라인):
+### Prompt bank 기반 LLM 생성:
 
 ```powershell
-python scripts/generate_dataset.py --count 2 --category ui_reward --no-llm --verbose
+python scripts/generate_dataset.py --count 2 --category ui_reward --verbose
 ```
 
 지원 카테고리: `ui_reward`, `emoji_motion`, `game_vfx`, `item_showcase`, `button_motion`.
@@ -79,10 +79,10 @@ dataset/
 `metadata.jsonl` 한 줄 예시:
 
 ```json
-{"id":"ui_reward_diamond_icon_0000","video":"videos/ui_reward_diamond_icon_0000.mp4",
- "html":"html/ui_reward_diamond_icon_0000.html","caption":"[UI_REWARD] A polished mobile game UI icon ...",
- "asset_type":"ui_reward","subject":"diamond icon","motion_preset":"float_loop",
- "duration":2.0,"fps":24,"resolution":"512x512","source":"fallback_template", ...}
+{"id":"ui_reward_gold_coin_icon_0000","video":"videos/ui_reward_gold_coin_icon_0000.mp4",
+ "html":"html/ui_reward_gold_coin_icon_0000.html","caption":"[UI_REWARD] A polished mobile game UI icon ...",
+ "asset_type":"ui_reward","subject":"gold coin icon","motion_preset":"reward_burst",
+ "duration":2.0,"fps":24,"resolution":"512x512","source":"prompt_bank", ...}
 ```
 
 CLI 옵션:
@@ -91,10 +91,8 @@ CLI 옵션:
 |------|------|
 | `--count N` | 생성할 샘플 수 (필수) |
 | `--category ...` | 카테고리 (필수) |
-| `--seed N` | spec grid 결정성 |
-| `--duration 2.0` | 영상 길이(초) |
 | `--start-id N` | 시작 인덱스 (기본: 기존 metadata 다음) |
-| `--no-llm` | LLM 호출 생략, fallback 템플릿만 사용 |
+| `--prompt-bank PATH` | user prompt bank JSON 경로 (기본: `lmstudio/data/user_prompt_bank.json`) |
 | `--also-webm` | MP4와 함께 WebM도 출력 |
 | `--keep-frames` | PNG 프레임을 보존 (디버깅용) |
 | `--verbose` | stderr에 진행/오류 로그 출력 |
@@ -231,7 +229,7 @@ game_asset_video_pipeline/
 
 - **Windows + decord**: `num_workers > 0`이면 종종 데드락이 발생합니다. config 기본값은 `num_workers: 0`.
 - **bitsandbytes (8bit AdamW)**: Windows wheel은 불안정합니다. 안 되면 `train.optim: "adamw"`로 두세요.
-- **외부 CDN 금지**: LLM이 `https://cdn...` 같은 외부 자원을 참조하면 자동으로 fallback 템플릿으로 돌아갑니다.
+- **외부 CDN 금지**: LLM이 `https://cdn...` 같은 외부 자원을 참조하면 해당 샘플은 `failed.jsonl`에 기록됩니다.
 - **워터마크/텍스트 금지**: 시스템 프롬프트에서 강제하지만, 실 검수에서 텍스트가 보이면 해당 샘플을 수동 제외하세요.
 - **첫 실험은 100개로 overfit 테스트** (Implementation_plan §15 Phase 3 가이드).
 - **Git 자동 동기화 없음** (사용자 룰 #2): commit/push는 명시 요청 시에만 수행됩니다.
@@ -241,8 +239,8 @@ game_asset_video_pipeline/
 ## 7. 빠른 검증 (방금 만든 환경 기준)
 
 ```powershell
-# 1) Phase 1 smoke (LM Studio 없이도 동작)
-python scripts/generate_dataset.py --count 2 --category ui_reward --no-llm --verbose
+# 1) Phase 1 smoke (LM Studio 필요)
+python scripts/generate_dataset.py --count 2 --category ui_reward --verbose
 
 # 2) Phase 2
 python scripts/preprocess_dataset.py --verbose --val-ratio 0.5

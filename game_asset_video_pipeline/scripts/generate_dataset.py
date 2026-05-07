@@ -20,8 +20,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.config import Settings, get_settings  # noqa: E402
 from caption.caption_builder import build_caption  # noqa: E402
-from html_generator.generate_html import GeneratedHTML, generate_for_spec  # noqa: E402
-from lmstudio.prompts import ASSET_TYPES, build_spec_grid  # noqa: E402
+from html_generator.generate_html import GeneratedHTML, generate_for_spec, make_sample_id  # noqa: E402
+from lmstudio.prompts import ASSET_TYPES, load_prompt_bank  # noqa: E402
 from renderer.render_html_to_video import RenderedVideo, render_html  # noqa: E402
 
 try:
@@ -39,6 +39,22 @@ def _append_jsonl(path: Path, record: Dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+def _cleanup_partial_outputs(cfg: Settings, sample_id: str) -> None:
+    """Best-effort cleanup between retries so stale artifacts don't confuse later steps."""
+
+    try:
+        (cfg.html_dir / f"{sample_id}.html").unlink(missing_ok=True)  # py>=3.8
+    except Exception:
+        pass
+    try:
+        (cfg.videos_dir / f"{sample_id}.mp4").unlink(missing_ok=True)
+    except Exception:
+        pass
+    try:
+        (cfg.videos_dir / f"{sample_id}.webm").unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _to_relative(path: Path, base: Path) -> str:
@@ -63,6 +79,8 @@ def _build_metadata_record(
         "caption": caption,
         "asset_type": spec["asset_type"],
         "subject": spec["subject"],
+        "prompt_id": spec.get("prompt_id"),
+        "user_prompt": spec.get("user_prompt"),
         "motion_preset": spec.get("motion_preset"),
         "motion": spec.get("motion"),
         "style": spec.get("style"),
@@ -70,7 +88,7 @@ def _build_metadata_record(
         "duration": float(spec.get("duration", cfg.default_duration)),
         "fps": int(spec.get("fps", cfg.fps)),
         "resolution": f"{cfg.resolution}x{cfg.resolution}",
-        "source": "fallback_template" if html.used_fallback else "lm_studio",
+        "source": "prompt_bank",
         "created_at": _utc_now_iso(),
     }
 
@@ -112,11 +130,9 @@ def run(
     *,
     count: int,
     category: str,
-    use_llm: bool,
     also_webm: bool,
     keep_frames: bool,
-    seed: int,
-    duration: float,
+    prompt_bank: Optional[Path],
     start_id: Optional[int],
     verbose: bool,
 ) -> int:
@@ -131,47 +147,81 @@ def run(
         return 2
 
     base_index = start_id if start_id is not None else _existing_id_max(cfg.metadata_path, category) + 1
-    specs: List[Dict] = build_spec_grid(
-        category=category,
-        count=count,
-        seed=seed,
-        duration=duration,
-        fps=cfg.fps,
-        resolution=cfg.resolution,
-    )
+    prompt_items = load_prompt_bank(prompt_bank) if prompt_bank else load_prompt_bank()
+    specs_all = [item for item in prompt_items if item.get("asset_type") == category]
+    if len(specs_all) < count:
+        print(
+            f"[generate] requested count={count}, but prompt bank has only {len(specs_all)} "
+            f"entries for category={category}; generating available entries only.",
+            file=sys.stderr,
+            flush=True,
+        )
+    specs: List[Dict] = []
+    for item in specs_all[:count]:
+        spec = dict(item)
+        spec.setdefault("duration", cfg.default_duration)
+        spec.setdefault("fps", cfg.fps)
+        spec.setdefault("resolution", cfg.resolution)
+        specs.append(spec)
 
     ok = 0
     fail = 0
     iterator = tqdm(list(enumerate(specs, start=base_index)), desc=f"gen[{category}]", disable=not verbose)
     for index, spec in iterator:
-        sample_id: Optional[str] = None
-        try:
-            html = generate_for_spec(
-                spec, index=index, settings=cfg, use_llm=use_llm, verbose=verbose,
-            )
-            sample_id = html.sample_id
-
-            video = render_html(
-                html.html_path, sample_id,
-                duration_s=float(spec["duration"]),
-                fps=int(spec["fps"]),
-                resolution=int(spec["resolution"]),
-                also_webm=also_webm,
-                keep_frames=keep_frames,
-                settings=cfg,
-                verbose=verbose,
+        sample_id = make_sample_id(spec, index)
+        if verbose:
+            print(
+                f"\n[generate] ========== {sample_id} ==========",
+                file=sys.stderr,
+                flush=True,
             )
 
-            caption = build_caption(spec)
-            record = _build_metadata_record(spec, html, video, caption, cfg)
-            _append_jsonl(cfg.metadata_path, record)
-            ok += 1
-        except Exception as exc:
+        # End-to-end retry policy (HTML generation + render + metadata write).
+        # LMStudio itself has internal retries; this adds retries for render/ffmpeg/etc too.
+        last_exc: Optional[BaseException] = None
+        for attempt in range(1, cfg.lmstudio_max_retries + 1):
+            if attempt > 1:
+                _cleanup_partial_outputs(cfg, sample_id)
+            try:
+                if verbose:
+                    print(
+                        f"[generate] attempt {attempt}/{cfg.lmstudio_max_retries}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+                html = generate_for_spec(spec, index=index, settings=cfg, verbose=verbose)
+                video = render_html(
+                    html.html_path,
+                    sample_id,
+                    duration_s=float(spec["duration"]),
+                    fps=int(spec["fps"]),
+                    resolution=int(spec["resolution"]),
+                    also_webm=also_webm,
+                    keep_frames=keep_frames,
+                    settings=cfg,
+                    verbose=verbose,
+                )
+
+                caption = build_caption(spec)
+                record = _build_metadata_record(spec, html, video, caption, cfg)
+                _append_jsonl(cfg.metadata_path, record)
+                ok += 1
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if verbose:
+                    print(
+                        f"[generate] ERROR sample_id={sample_id} attempt={attempt}/{cfg.lmstudio_max_retries}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    traceback.print_exc(file=sys.stderr)
+
+        if last_exc is not None:
             fail += 1
-            _append_jsonl(cfg.failed_path, _build_failure_record(spec, sample_id, exc))
-            if verbose:
-                print(f"[generate] FAILED {sample_id or spec.get('asset_type')}: {exc}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
+            _append_jsonl(cfg.failed_path, _build_failure_record(spec, sample_id, last_exc))
 
     print(f"done: ok={ok} fail={fail} metadata={cfg.metadata_path}")
     return 0 if ok > 0 else 1
@@ -181,12 +231,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate HTML animation dataset (HTML -> MP4 + metadata.jsonl).")
     p.add_argument("--count", type=int, required=True, help="number of samples to generate")
     p.add_argument("--category", type=str, required=True, choices=list(ASSET_TYPES))
-    p.add_argument("--seed", type=int, default=0, help="RNG seed for spec grid")
-    p.add_argument("--duration", type=float, default=2.0, help="animation duration in seconds")
     p.add_argument("--start-id", type=int, default=None,
                    help="starting numeric index for sample IDs; default appends after existing metadata")
-    p.add_argument("--no-llm", action="store_true",
-                   help="skip LM Studio entirely and use bundled HTML templates")
+    p.add_argument(
+        "--prompt-bank",
+        type=Path,
+        default=None,
+        help="path to prompt bank json; defaults to lmstudio/data/user_prompt_bank.json",
+    )
     p.add_argument("--also-webm", action="store_true", help="encode an additional .webm output")
     p.add_argument("--keep-frames", action="store_true", help="do not delete the per-sample PNG frames after encoding")
     p.add_argument("--verbose", action="store_true", help="emit progress + error logs to stderr")
@@ -198,11 +250,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     return run(
         count=args.count,
         category=args.category,
-        use_llm=not args.no_llm,
         also_webm=args.also_webm,
         keep_frames=args.keep_frames,
-        seed=args.seed,
-        duration=args.duration,
+        prompt_bank=args.prompt_bank,
         start_id=args.start_id,
         verbose=args.verbose,
     )
