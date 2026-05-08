@@ -26,30 +26,51 @@ export default function GeneratePage() {
 
   const { state, start, cancel } = useJobRunner();
   const { data: lms } = useSWR("/api/lmstudio/ping", fetcher, { refreshInterval: 30000 });
-  const [lastBatch, setLastBatch] = useState<MetadataRecord[]>([]);
+  const [allVideos, setAllVideos] = useState<MetadataRecord[]>([]);
+  const [allVideoError, setAllVideoError] = useState<string | null>(null);
   const busy = state.status === "running";
 
-  const fetchRecent = useCallback(async () => {
+  const fetchAllVideos = useCallback(async () => {
     try {
-      const j = await fetch(`/api/dataset/list?page=1&pageSize=${count}&category=${category}`).then((r) => r.json());
-      setLastBatch(j.items ?? []);
-    } catch { /* ignore */ }
-  }, [category, count]);
+      const res = await fetch("/api/dataset/videos");
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const j = await res.json();
+      setAllVideos(j.items ?? []);
+      setAllVideoError(null);
+    } catch (e) {
+      const msg = `All Video 갱신 실패: ${(e as Error).message}`;
+      setAllVideoError(msg);
+      toast.error(msg);
+    }
+  }, []);
 
   /** While a job runs, metadata.jsonl grows sample-by-sample — poll so Latest preview updates mid-run. */
   useEffect(() => {
     if (!busy) return;
-    void fetchRecent();
-    const id = setInterval(() => void fetchRecent(), 2000);
-    return () => clearInterval(id);
-  }, [busy, fetchRecent]);
+    void fetchAllVideos();
+    return;
+  }, [busy, fetchAllVideos]);
 
   /** Final refresh when the job ends (interval may have stopped slightly before the last line landed). */
   useEffect(() => {
     if (state.status === "done" || state.status === "error" || state.status === "cancelled") {
-      void fetchRecent();
+      void fetchAllVideos();
     }
-  }, [state.status, fetchRecent]);
+  }, [state.status, fetchAllVideos]);
+
+  useEffect(() => {
+    if (!busy || state.lines.length === 0) return;
+    const last = state.lines[state.lines.length - 1]?.text ?? "";
+    if (last.includes("SAMPLE_DONE") || last.startsWith("done:")) {
+      void fetchAllVideos();
+    }
+  }, [busy, state.lines, fetchAllVideos]);
+
+  useEffect(() => {
+    void fetchAllVideos();
+  }, [fetchAllVideos]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -145,9 +166,7 @@ export default function GeneratePage() {
               {busy && (
                 <span className="text-xs text-muted-foreground self-center mr-auto">Preview 아래도 약 2초마다 갱신됩니다.</span>
               )}
-              {(state.status === "done" || state.status === "error" || state.status === "cancelled") && (
-                <Button size="sm" variant="outline" onClick={fetchRecent}>Refresh preview</Button>
-              )}
+              <Button size="sm" variant="outline" onClick={fetchAllVideos}>Refresh all videos</Button>
             </div>
           </CardContent>
         </Card>
@@ -155,13 +174,16 @@ export default function GeneratePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Latest preview</CardTitle>
+          <CardTitle>All Video</CardTitle>
           <CardDescription>
-            같은 카테고리에서 최신 순 최대 {count}개입니다. 생성 중에도 주기적으로 갱신됩니다.
+            dataset/videos 디렉토리에 저장된 전체 동영상을 최신 파일 순으로 표시합니다.
           </CardDescription>
+          {allVideoError && (
+            <p className="text-xs text-destructive">{allVideoError}</p>
+          )}
         </CardHeader>
         <CardContent>
-          <VideoGrid items={lastBatch} emptyHint="작업을 시작하면 완료된 클립이 여기에 순서대로 나타납니다." />
+          <VideoGrid items={allVideos} emptyHint="동영상 파일이 아직 없습니다." />
         </CardContent>
       </Card>
     </div>

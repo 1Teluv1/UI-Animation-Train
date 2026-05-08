@@ -26,6 +26,11 @@ const initial: RunnerState = {
   finishedAt: null,
 };
 
+interface BusyConflictResponse {
+  error?: string;
+  active?: JobSummary;
+}
+
 export interface JobRunnerHandle {
   start: (init: () => Promise<Response>) => Promise<void>;
   cancel: () => Promise<void>;
@@ -76,7 +81,20 @@ export function useJobRunner(): {
     }
     if (!res.ok || !res.body) {
       let detail = res.statusText;
-      try { detail = JSON.stringify(await res.json()); } catch { /* ignore */ }
+      try {
+        const payload = (await res.json()) as BusyConflictResponse;
+        if (res.status === 409 && payload?.active) {
+          const active = payload.active;
+          const activeSec = Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000));
+          detail =
+            `이미 실행 중인 작업이 있어 시작할 수 없습니다. ` +
+            `active=${active.id} (${active.kind}, ${activeSec}s 경과)`;
+        } else if (payload?.error) {
+          detail = payload.error;
+        } else {
+          detail = JSON.stringify(payload);
+        }
+      } catch { /* ignore */ }
       setState((s) => ({
         ...s,
         status: "error",

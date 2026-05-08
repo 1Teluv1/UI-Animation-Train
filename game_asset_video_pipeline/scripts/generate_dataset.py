@@ -207,6 +207,11 @@ def run(
                 record = _build_metadata_record(spec, html, video, caption, cfg)
                 _append_jsonl(cfg.metadata_path, record)
                 ok += 1
+                print(
+                    f"[generate] SAMPLE_DONE id={html.sample_id} video={video.mp4_path.name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 last_exc = None
                 break
             except Exception as exc:
